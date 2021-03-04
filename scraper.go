@@ -31,71 +31,54 @@ func RunScraper() ([]JobListing){
 	
 
 	go getYCJobListings(4, jobListingsChan)
-
-	// ycJobListings, err := getYCJobListings(4)
-	// if err != nil{
-	// 	log.Panic("There was an error getting YC Job Listings")
-	// }
+	go getIndeedJobListings(1, jobListingsChan)
 
 	for jobListing := range jobListingsChan{
 		totalJobListings = append(totalJobListings, jobListing)
-		fmt.Println("Recieved a new job listing")
 	}
-
-	// totalJobListings = append(totalJobListings, ycJobListings...)
-
-	// indeedJobListings, err := getIndeedJobListings(1)
-	// if err != nil{
-	// 	log.Panic("There was an error getting Indeed Job Listing")
-	// }
-
-	// totalJobListings = append(totalJobListings, indeedJobListings...)
-
+	
 	return totalJobListings
 }	
 
 // Indeed Handler
-func getIndeedJobListings(numPages int) ([]JobListing, error){
+func getIndeedJobListings(numPages int, jobListingsChan chan<- JobListing){
+	// Get Job Listings from LinkedIn Job Board 
+	
 	// create context
 	log.Info("Initializing Context")
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
-	// Get Job Listings from LinkedIn Job Board
-
 	const IndeedOrigin string = "https://www.indeed.com/jobs?q=Software+Engineer&l=San+Francisco+Bay+Area%2C+CA"
-
-	// Define output array
-	jobListings := []JobListing{}
 
 	ctx, cancel = context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
 	// Navigate to page
 	if err := chromedp.Run(ctx, chromedp.Navigate(IndeedOrigin)); err != nil {
-		return nil, fmt.Errorf("Error navigating to indeed url")
+		panic("Error navigating to indeed url")
 	}
 
 	log.Info("Looking at Indeed page #1")
 
 	var postingTitles []*cdp.Node
 	if err := chromedp.Run(ctx, chromedp.Nodes(`//*[contains(concat( " ", @class, " " ), concat( " ", "jobtitle", " " ))]`, &postingTitles)); err != nil {
-		return nil, fmt.Errorf("Error getting job titles from indeed")
+		panic("Error getting job titles from indeed")
 	}
 
 	var postingCompanies []*cdp.Node
 	if err := chromedp.Run(ctx, chromedp.Nodes(`.company .turnstileLink , .company`, &postingCompanies)); err != nil {
-		return nil, fmt.Errorf("Error getting company name from indeed")
+		panic("Error getting company name from indeed")
 	}
 
 	var postingDates []*cdp.Node
 	if err := chromedp.Run(ctx, chromedp.Nodes(".date", &postingDates)); err != nil {
-		return nil, fmt.Errorf("Error getting posting date from indeed")
+		panic("Error getting posting date from indeed")
 	}
 
 	var postingLocation []*cdp.Node
 	if err := chromedp.Run(ctx, chromedp.Nodes(".accessible-contrast-color-location", &postingLocation)); err != nil {
-		return nil, fmt.Errorf("Error getting posting location from indeed")
+		panic("Error getting posting location from indeed")
 	}
 
 	for i := 0; i < len(postingTitles); i++{
@@ -124,10 +107,10 @@ func getIndeedJobListings(numPages int) ([]JobListing, error){
 			Origin: IndeedOrigin,
 		}
 		
-		jobListings = append(jobListings, newListing)
+		jobListingsChan <- newListing
 	}
 
-	return jobListings, nil
+	close(jobListingsChan)
 }
 
 // YC Handler
