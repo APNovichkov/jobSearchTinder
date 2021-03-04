@@ -1,11 +1,9 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 
-	"github.com/chromedp/chromedp"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -20,13 +18,8 @@ func main() {
 		FullTimestamp: true,
 	})
 
-	// create context
-	log.Info("Initializing Context")
-	ctx, cancel := chromedp.NewContext(context.Background())
-	defer cancel()
-
 	log.Info("Getting Job Listings")
-	jobListings, _ := getYCJobListings(ctx, 3)
+	jobListings := RunScraper()
 
 	log.Info("Converting Job Listings to JSON")
 	jobListingsString, _ := json.Marshal(jobListings)

@@ -20,19 +20,19 @@ type JobListing struct{
 	Origin string   `json:"origin"`
 }
 
-func RunScraper(ctx context.Context) ([]JobListing){
+func RunScraper() ([]JobListing){
 	log.Info("Running Scraper Module")
 
 	totalJobListings := []JobListing{}
 
-	ycJobListings, err := getYCJobListings(ctx, 4)
+	ycJobListings, err := getYCJobListings(4)
 	if err != nil{
 		log.Panic("There was an error getting YC Job Listings")
 	}
 
 	totalJobListings = append(totalJobListings, ycJobListings...)
 
-	indeedJobListings, err := getIndeedJobListings(ctx, 1)
+	indeedJobListings, err := getIndeedJobListings(1)
 	if err != nil{
 		log.Panic("There was an error getting Indeed Job Listing")
 	}
@@ -42,33 +42,37 @@ func RunScraper(ctx context.Context) ([]JobListing){
 	return totalJobListings
 }	
 
-
 // Indeed Handler
-func getIndeedJobListings(ctx context.Context, numPages int) ([]JobListing, error){
+func getIndeedJobListings(numPages int) ([]JobListing, error){
+	// create context
+	log.Info("Initializing Context")
+	ctx, cancel := chromedp.NewContext(context.Background())
+	defer cancel()
+
 	// Get Job Listings from LinkedIn Job Board
 
-	const INDEED_ORIGIN string = "https://www.indeed.com/jobs?q=Software+Engineer&l=San+Francisco+Bay+Area%2C+CA"
+	const IndeedOrigin string = "https://www.indeed.com/jobs?q=Software+Engineer&l=San+Francisco+Bay+Area%2C+CA"
 
 	// Define output array
 	jobListings := []JobListing{}
 
-	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	ctx, cancel = context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
 	// Navigate to page
-	if err := chromedp.Run(ctx, chromedp.Navigate(INDEED_ORIGIN)); err != nil {
+	if err := chromedp.Run(ctx, chromedp.Navigate(IndeedOrigin)); err != nil {
 		return nil, fmt.Errorf("Error navigating to indeed url")
 	}
 
-	log.Info("Looking at linked in page #1")
+	log.Info("Looking at Indeed page #1")
 
 	var postingTitles []*cdp.Node
-	if err := chromedp.Run(ctx, chromedp.Nodes(".jobtitle", &postingTitles)); err != nil {
+	if err := chromedp.Run(ctx, chromedp.Nodes(`//*[contains(concat( " ", @class, " " ), concat( " ", "jobtitle", " " ))]`, &postingTitles)); err != nil {
 		return nil, fmt.Errorf("Error getting job titles from indeed")
 	}
 
 	var postingCompanies []*cdp.Node
-	if err := chromedp.Run(ctx, chromedp.Nodes(".company , .company .turnstileLink", &postingCompanies)); err != nil {
+	if err := chromedp.Run(ctx, chromedp.Nodes(`.company .turnstileLink , .company`, &postingCompanies)); err != nil {
 		return nil, fmt.Errorf("Error getting company name from indeed")
 	}
 
@@ -83,13 +87,29 @@ func getIndeedJobListings(ctx context.Context, numPages int) ([]JobListing, erro
 	}
 
 	for i := 0; i < len(postingTitles); i++{
+		titleVal, _ := postingTitles[i].Attribute("title")
+		locationVal := ""
+		dateVal := ""
+
+		if (postingLocation[i].Children != nil){
+			locationVal =  postingLocation[i].Children[0].NodeValue
+		}else{
+			locationVal = "NA"
+		}
+
+		if (postingDates[i].Children != nil){
+			dateVal = postingDates[i].Children[0].NodeValue
+		}else{
+			dateVal = "NA"
+		}
+
 		newListing := JobListing{
-			Title: postingTitles[i].Children[0].NodeValue,
+			Title: titleVal,
 			Company: postingCompanies[i].Children[0].NodeValue,
-			Location: postingLocation[i].Children[0].NodeValue,
+			Location: locationVal,
 			Url: "NA",
-			Age: postingDates[i].Children[0].NodeValue,
-			Origin: INDEED_ORIGIN,
+			Age: dateVal,
+			Origin: IndeedOrigin,
 		}
 		
 		jobListings = append(jobListings, newListing)
@@ -100,20 +120,25 @@ func getIndeedJobListings(ctx context.Context, numPages int) ([]JobListing, erro
 
 
 // YC Handler
-func getYCJobListings(ctx context.Context, numPages int) ([]JobListing, error){
+func getYCJobListings(numPages int) ([]JobListing, error){
 	// Get Job Listings from the YCombinator hacker news jobs page
 
-	const YC_ORIGIN string = "https://news.ycombinator.com/jobs"
+	// create context
+	log.Info("Initializing Context")
+	ctx, cancel := chromedp.NewContext(context.Background())
+	defer cancel()
+
+	const YcOrigin string = "https://news.ycombinator.com/jobs"
 
 	// Define output array
 	jobListings := []JobListing{}
 
 	// Add timeout to context
-	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	ctx, cancel = context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
 	// Navigate to page
-	if err := chromedp.Run(ctx, chromedp.Navigate(YC_ORIGIN)); err != nil {
+	if err := chromedp.Run(ctx, chromedp.Navigate(YcOrigin)); err != nil {
 		return nil, fmt.Errorf("Error getting to yc url")
 	}
 
@@ -141,10 +166,12 @@ func getYCJobListings(ctx context.Context, numPages int) ([]JobListing, error){
 		for i := 0; i < len(postingTitles); i++ {
 			newListing := JobListing{
 				Title: postingTitles[i].Children[0].NodeValue,
+				Company: "NA",
+				Location: "NA",
 				Url: postingTitles[i].AttributeValue("href"),
 				Age: postingDates[i].Children[0].NodeValue,
 				IntAge: ConvertStringDateToInt(postingDates[i].Children[0].NodeValue),
-				Origin: YC_ORIGIN,
+				Origin: YcOrigin,
 			}
 
 			jobListings = append(jobListings, newListing)
