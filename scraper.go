@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"time"
+	"sync"
 
 	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/chromedp"
@@ -21,7 +21,6 @@ type JobListing struct{
 }
 
 
-
 func RunScraper() ([]JobListing){
 	log.Info("Running Scraper Module")
 
@@ -29,30 +28,35 @@ func RunScraper() ([]JobListing){
 	totalJobListings := []JobListing{}
 	jobListingsChan := make(chan JobListing)
 	
+	var wg sync.WaitGroup
 
-	go getYCJobListings(4, jobListingsChan)
-	go getIndeedJobListings(1, jobListingsChan)
+	wg.Add(1)
+	go getYCJobListings(4, jobListingsChan, wg)
+	wg.Add(1)
+	go getIndeedJobListings(1, jobListingsChan, wg)
 
 	for jobListing := range jobListingsChan{
 		totalJobListings = append(totalJobListings, jobListing)
 	}
-	
+
+	// wg.Wait()
 	return totalJobListings
 }	
 
 // Indeed Handler
-func getIndeedJobListings(numPages int, jobListingsChan chan<- JobListing){
+func getIndeedJobListings(numPages int, jobListingsChan chan JobListing, wg sync.WaitGroup){
 	// Get Job Listings from LinkedIn Job Board 
-	
+	defer wg.Done()
+
 	// create context
-	log.Info("Initializing Context")
+	log.Info("Initializing Context for Indeed scraper")
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
-	const IndeedOrigin string = "https://www.indeed.com/jobs?q=Software+Engineer&l=San+Francisco+Bay+Area%2C+CA"
+	// ctx, cancel = context.WithTimeout(ctx, 15*time.Second)
+	// defer cancel()
 
-	ctx, cancel = context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
+	const IndeedOrigin string = "https://www.indeed.com/jobs?q=Software+Engineer&l=San+Francisco+Bay+Area%2C+CA"
 
 	// Navigate to page
 	if err := chromedp.Run(ctx, chromedp.Navigate(IndeedOrigin)); err != nil {
@@ -110,26 +114,27 @@ func getIndeedJobListings(numPages int, jobListingsChan chan<- JobListing){
 		jobListingsChan <- newListing
 	}
 
-	close(jobListingsChan)
+	
+
+	cancel()
 }
 
 // YC Handler
-func getYCJobListings(numPages int, jobListingsChan chan<- JobListing){
+func getYCJobListings(numPages int, jobListingsChan chan JobListing, wg sync.WaitGroup){
 	// Get Job Listings from the YCombinator hacker news jobs page
 
-	// create context
-	log.Info("Initializing Context")
+	defer wg.Done()
+
+	// Define Context
+	log.Info("Initializing context for YC scraper")
 	ctx, cancel := chromedp.NewContext(context.Background())
-	defer cancel()
+    defer cancel()
 
 	const YcOrigin string = "https://news.ycombinator.com/jobs"
 
-	// Define output array
-	// jobListings := []JobListing{}
-
 	// Add timeout to context
-	ctx, cancel = context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
+	// ctx, cancel = context.WithTimeout(ctx, 15*time.Second)
+	// defer cancel()
 
 	// Navigate to page
 	if err := chromedp.Run(ctx, chromedp.Navigate(YcOrigin)); err != nil {
@@ -169,7 +174,6 @@ func getYCJobListings(numPages int, jobListingsChan chan<- JobListing){
 			}
 
 			jobListingsChan <- newListing
-			// jobListings = append(jobListings, newListing)
 		}
 
 		// Click on More link
@@ -181,73 +185,5 @@ func getYCJobListings(numPages int, jobListingsChan chan<- JobListing){
 
 	close(jobListingsChan)
 
-}
-
-
-// YC Handler
-func getYCJobListings__(numPages int) ([]JobListing, error){
-	// Get Job Listings from the YCombinator hacker news jobs page
-
-	// create context
-	log.Info("Initializing Context")
-	ctx, cancel := chromedp.NewContext(context.Background())
-	defer cancel()
-
-	const YcOrigin string = "https://news.ycombinator.com/jobs"
-
-	// Define output array
-	jobListings := []JobListing{}
-
-	// Add timeout to context
-	ctx, cancel = context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-
-	// Navigate to page
-	if err := chromedp.Run(ctx, chromedp.Navigate(YcOrigin)); err != nil {
-		return nil, fmt.Errorf("Error getting to yc url")
-	}
-
-	for i := 0; i < numPages; i++ {
-		log.Info(fmt.Sprintf("Looking at page #%v", i+1))
-
-		// Scrape Posting titles data
-		var postingTitles []*cdp.Node
-		if err := chromedp.Run(ctx, chromedp.Nodes(`.storylink`, &postingTitles)); err != nil {
-			return nil, fmt.Errorf("Error getting to job posting object: %v", err)
-		}
-
-		// Scrape Posting dates data
-		var postingDates []*cdp.Node
-		if err := chromedp.Run(ctx, chromedp.Nodes(`.age a`, &postingDates)); err != nil {
-			return nil, fmt.Errorf("Error getting jon posting dates: %v", err)
-		}
-
-		// Check if lengths of these two are the same
-		if len(postingTitles) != len(postingDates) {
-			panic("Length of posting titles and dates do not align!!")
-		}
-
-		// Parse data into a new struct and append to output array
-		for i := 0; i < len(postingTitles); i++ {
-			newListing := JobListing{
-				Title: postingTitles[i].Children[0].NodeValue,
-				Company: "NA",
-				Location: "NA",
-				Url: postingTitles[i].AttributeValue("href"),
-				Age: postingDates[i].Children[0].NodeValue,
-				IntAge: ConvertStringDateToInt(postingDates[i].Children[0].NodeValue),
-				Origin: YcOrigin,
-			}
-
-			jobListings = append(jobListings, newListing)
-		}
-
-		// Click on More link
-		log.Info(fmt.Sprintf("Clicking on More link"))
-		if err := chromedp.Run(ctx, chromedp.Click(`.morelink`, chromedp.NodeVisible)); err != nil {
-			return nil, fmt.Errorf("Error clicking on 'More' link")
-		}
-	}
-
-	return jobListings, nil
+	cancel()
 }
