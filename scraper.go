@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/chromedp"
@@ -22,30 +23,43 @@ type JobListing struct{
 
 
 func RunScraper() ([]JobListing){
+	// Main Scraper Function
+
 	log.Info("Running Scraper Module")
-
 	
+	wg := sync.WaitGroup{}
 	totalJobListings := []JobListing{}
-	jobListingsChan := make(chan JobListing)
+	jobListingsChan := make(chan JobListing, 1000)
 	
-	var wg sync.WaitGroup
-
 	wg.Add(1)
-	go getYCJobListings(4, jobListingsChan, wg)
+	go getYCJobListings(4, jobListingsChan, &wg)
 	wg.Add(1)
-	go getIndeedJobListings(1, jobListingsChan, wg)
+	go getIndeedJobListings(1, jobListingsChan, &wg)
 
-	for jobListing := range jobListingsChan{
-		totalJobListings = append(totalJobListings, jobListing)
-	}
+	go func() {
+		defer close(jobListingsChan)
+        wg.Wait()
+	}()
+	
+	for i := 0; i < 100000; i++ {
+        select {
+        case jobListing, ok := <-jobListingsChan:
+            if !ok {
+                jobListingsChan = nil
+            }
+            totalJobListings = append(totalJobListings, jobListing)
+		}
+        if jobListingsChan == nil {
+			break
+        }
+    }
 
-	// wg.Wait()
 	return totalJobListings
 }	
 
-// Indeed Handler
-func getIndeedJobListings(numPages int, jobListingsChan chan JobListing, wg sync.WaitGroup){
+func getIndeedJobListings(numPages int, jobListingsChan chan JobListing, wg *sync.WaitGroup){
 	// Get Job Listings from LinkedIn Job Board 
+	
 	defer wg.Done()
 
 	// create context
@@ -53,8 +67,8 @@ func getIndeedJobListings(numPages int, jobListingsChan chan JobListing, wg sync
 	ctx, cancel := chromedp.NewContext(context.Background())
 	defer cancel()
 
-	// ctx, cancel = context.WithTimeout(ctx, 15*time.Second)
-	// defer cancel()
+	ctx, cancel = context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
 
 	const IndeedOrigin string = "https://www.indeed.com/jobs?q=Software+Engineer&l=San+Francisco+Bay+Area%2C+CA"
 
@@ -114,13 +128,10 @@ func getIndeedJobListings(numPages int, jobListingsChan chan JobListing, wg sync
 		jobListingsChan <- newListing
 	}
 
-	
-
-	cancel()
+	log.Info("Finished Indeed scraping!!")
 }
 
-// YC Handler
-func getYCJobListings(numPages int, jobListingsChan chan JobListing, wg sync.WaitGroup){
+func getYCJobListings(numPages int, jobListingsChan chan JobListing, wg *sync.WaitGroup){
 	// Get Job Listings from the YCombinator hacker news jobs page
 
 	defer wg.Done()
@@ -132,9 +143,9 @@ func getYCJobListings(numPages int, jobListingsChan chan JobListing, wg sync.Wai
 
 	const YcOrigin string = "https://news.ycombinator.com/jobs"
 
-	// Add timeout to context
-	// ctx, cancel = context.WithTimeout(ctx, 15*time.Second)
-	// defer cancel()
+	//Add timeout to context
+	ctx, cancel = context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
 
 	// Navigate to page
 	if err := chromedp.Run(ctx, chromedp.Navigate(YcOrigin)); err != nil {
@@ -183,7 +194,5 @@ func getYCJobListings(numPages int, jobListingsChan chan JobListing, wg sync.Wai
 		}
 	}
 
-	close(jobListingsChan)
-
-	cancel()
+	log.Info("Finished YC scraping!!")
 }
